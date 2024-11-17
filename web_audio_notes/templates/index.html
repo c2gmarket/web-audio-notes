@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Notes Recorder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .recording-controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .record-button {
+            background-color: #ff4444;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .record-button.recording {
+            background-color: #cc0000;
+            animation: pulse 1.5s infinite;
+        }
+        .notes-list {
+            margin-top: 20px;
+        }
+        .note-item {
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .note-item:hover {
+            background-color: #f8f8f8;
+        }
+        .note-content {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-radius: 4px;
+        }
+        .status {
+            text-align: center;
+            margin: 10px 0;
+            color: #666;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .audio-player {
+            width: 100%;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Notes Recorder</h1>
+        
+        <div class="recording-controls">
+            <button id="recordButton" class="record-button">Start Recording</button>
+            <div id="status" class="status">Ready to record</div>
+        </div>
+
+        <div class="notes-list" id="notesList">
+            {% for note in notes %}
+            <div class="note-item" onclick="toggleNote(this)">
+                <h3>{{ note.title }}</h3>
+                <div class="note-content">
+                    <p>{{ note.content }}</p>
+                    {% if note.audio_file %}
+                    <audio class="audio-player" controls>
+                        <source src="{{ url_for('uploaded_file', filename=note.audio_file) }}" type="audio/wav">
+                        Your browser does not support the audio element.
+                    </audio>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        const recordButton = document.getElementById('recordButton');
+        const status = document.getElementById('status');
+        const notesList = document.getElementById('notesList');
+
+        recordButton.addEventListener('click', toggleRecording);
+
+        async function toggleRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    audioChunks.push(event.data);
+                });
+
+                mediaRecorder.addEventListener('stop', () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    uploadAudio(audioBlob);
+                });
+
+                mediaRecorder.start();
+                recordButton.textContent = 'Stop Recording';
+                recordButton.classList.add('recording');
+                status.textContent = 'Recording...';
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                status.textContent = 'Error: Could not access microphone';
+            }
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            recordButton.textContent = 'Start Recording';
+            recordButton.classList.remove('recording');
+            status.textContent = 'Processing...';
+        }
+
+        async function uploadAudio(audioBlob) {
+            const formData = new FormData();
+            formData.append('audio', audioBlob);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.textContent = 'Note saved successfully';
+                    addNoteToList(data.note);
+                } else {
+                    status.textContent = 'Error: ' + data.error;
+                }
+            } catch (err) {
+                console.error('Error uploading audio:', err);
+                status.textContent = 'Error uploading audio';
+            }
+        }
+
+        function addNoteToList(note) {
+            const noteDiv = document.createElement('div');
+            noteDiv.className = 'note-item';
+            noteDiv.onclick = () => toggleNote(noteDiv);
+            
+            noteDiv.innerHTML = `
+                <h3>${note.title}</h3>
+                <div class="note-content">
+                    <p>${note.content}</p>
+                    <audio class="audio-player" controls>
+                        <source src="/uploads/${note.audio_file}" type="audio/wav">
+                        Your browser does not support the audio element.
+                    </audio>
+                </div>
+            `;
+            
+            notesList.insertBefore(noteDiv, notesList.firstChild);
+        }
+
+        function toggleNote(element) {
+            const content = element.querySelector('.note-content');
+            content.style.display = content.style.display === 'none' ? 'block' : 'none';
+        }
+    </script>
+</body>
+</html>
